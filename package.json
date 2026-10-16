@@ -1,0 +1,85 @@
+{
+  "name": "xzy-ide",
+  "productName": "XZY IDE",
+  "version": "1.0.0",
+  "description": "XZY IDE - editor kode agentik untuk Windows dengan agen AI dari TokenomixAI",
+  "main": "src/main/main.js",
+  "author": {
+    "name": "Igustisultanh12",
+    "email": "igustisultanh12@users.noreply.github.com"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/Igustisultanh12/xzy-ide",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"tests/unit/*.test.js\"",
+    "test:e2e": "node tests/e2e/run.js",
+    "dist": "electron-builder --win nsis msi --x64 --publish never"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "0.10.0",
+    "@xterm/xterm": "5.5.0",
+    "dompurify": "3.2.4",
+    "marked": "15.0.6",
+    "monaco-editor": "0.52.2"
+  },
+  "optionalDependencies": {
+    "@lydell/node-pty": "1.1.0"
+  },
+  "devDependencies": {
+    "electron": "33.3.1",
+    "electron-builder": "25.1.8",
+    "playwright": "1.49.1"
+  },
+  "build": {
+    "appId": "id.xzyku.ide",
+    "productName": "XZY IDE",
+    "copyright": "Copyright (c) 2026 Igustisultanh12",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "node_modules/**/*",
+      "!node_modules/monaco-editor/esm/**",
+      "!node_modules/monaco-editor/dev/**",
+      "!node_modules/monaco-editor/min-maps/**",
+      "!**/*.map",
+      "!**/*.md",
+      "!**/test/**",
+      "!**/tests/**"
+    ],
+    "asarUnpack": [
+      "node_modules/@lydell/**"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "msi"
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "XZY-IDE-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "XZY IDE",
+      "artifactName": "XZY-IDE-Setup-${version}.exe"
+    },
+    "msi": {
+      "oneClick": false,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "XZY IDE",
+      "artifactName": "XZY-IDE-${version}.msi"
+    },
+    "fileAssociations": []
+  }
+}

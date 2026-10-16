@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="id" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>XZY IDE</title>
+  <link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app" class="no-workspace">
+    <!-- Activity bar -->
+    <nav id="activitybar" aria-label="Navigasi">
+      <div class="brand" title="XZY IDE">X</div>
+      <button class="act" data-view="explorer" title="Explorer (Ctrl+Shift+E)"></button>
+      <button class="act" data-view="search" title="Cari (Ctrl+Shift+F)"></button>
+      <button class="act" data-view="git" title="Source Control (Ctrl+Shift+G)"></button>
+      <button class="act" data-view="agents" title="Agent Manager (Ctrl+Shift+A)"></button>
+      <div class="spacer"></div>
+      <button class="act" data-action="preview" title="Pratinjau browser"></button>
+      <button class="act" data-action="settings" title="Pengaturan (Ctrl+,)"></button>
+    </nav>
+
+    <!-- Side bar -->
+    <aside id="sidebar">
+      <section class="view" id="view-explorer">
+        <header class="view-head">
+          <span class="view-title" id="ws-name">EXPLORER</span>
+          <div class="view-actions">
+            <button class="icon-btn" data-cmd="newFile" title="Berkas baru"></button>
+            <button class="icon-btn" data-cmd="newFolder" title="Folder baru"></button>
+            <button class="icon-btn" data-cmd="refreshTree" title="Muat ulang"></button>
+            <button class="icon-btn" data-cmd="collapseTree" title="Ciutkan semua"></button>
+          </div>
+        </header>
+        <div class="tree" id="tree" tabindex="0"></div>
+      </section>
+      <section class="view" id="view-search" hidden>
+        <header class="view-head"><span class="view-title">CARI</span></header>
+        <div class="search-box">
+          <input id="search-input" class="input" placeholder="Cari di workspace" spellcheck="false" />
+          <div class="search-opts">
+            <label><input type="checkbox" id="search-case" /> Aa</label>
+            <label><input type="checkbox" id="search-word" /> Kata utuh</label>
+            <label><input type="checkbox" id="search-regex" /> Regex</label>
+          </div>
+          <input id="search-include" class="input input-sm" placeholder="Berkas (mis. *.php)" spellcheck="false" />
+        </div>
+        <div class="search-results" id="search-results"></div>
+      </section>
+      <section class="view" id="view-git" hidden>
+        <header class="view-head">
+          <span class="view-title">SOURCE CONTROL</span>
+          <div class="view-actions">
+            <button class="icon-btn" data-cmd="gitPull" title="Pull"></button>
+            <button class="icon-btn" data-cmd="gitPush" title="Push"></button>
+            <button class="icon-btn" data-cmd="gitRefresh" title="Muat ulang"></button>
+          </div>
+        </header>
+        <div class="git-body" id="git-body"></div>
+      </section>
+      <section class="view" id="view-agents" hidden>
+        <header class="view-head">
+          <span class="view-title">AGENT MANAGER</span>
+          <div class="view-actions"><button class="icon-btn" data-cmd="newAgent" title="Agen baru"></button></div>
+        </header>
+        <div class="agents-list" id="agents-list"></div>
+      </section>
+    </aside>
+    <div class="resizer" id="resize-sidebar" data-target="sidebar"></div>
+
+    <!-- Main area -->
+    <main id="main">
+      <div id="welcome">
+        <div class="welcome-card">
+          <div class="welcome-logo">X</div>
+          <h1>XZY IDE</h1>
+          <p class="muted">Editor kode agentik. Agen AI dari TokenomixAI membaca, menulis, dan menjalankan kode di proyekmu.</p>
+          <div class="welcome-actions">
+            <button class="btn btn-primary" data-cmd="openFolder">Buka Folder</button>
+            <button class="btn" data-cmd="settings">Atur API Key</button>
+          </div>
+          <div id="api-warning" class="callout" hidden>API key TokenomixAI belum diisi. Buka Pengaturan untuk mengisinya.</div>
+          <h3>Terbaru</h3>
+          <div id="recent-list" class="recent-list"></div>
+          <div class="shortcuts muted">
+            <span><kbd>Ctrl</kbd>+<kbd>P</kbd> buka berkas</span>
+            <span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> perintah</span>
+            <span><kbd>Ctrl</kbd>+<kbd>L</kbd> chat agen</span>
+            <span><kbd>Ctrl</kbd>+<kbd>K</kbd> edit inline</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="editor-area">
+        <div id="tabs" class="tabs"></div>
+        <div id="breadcrumb" class="breadcrumb"></div>
+        <div id="editor-host">
+          <div id="editor"></div>
+          <div id="editor-empty" class="editor-empty">
+            <p>Buka berkas dari Explorer, atau minta agen membuatkan sesuatu.</p>
+            <p class="muted"><kbd>Ctrl</kbd>+<kbd>P</kbd> untuk mencari berkas</p>
+          </div>
+          <div id="preview-pane" hidden>
+            <div class="preview-bar">
+              <button class="icon-btn" data-cmd="previewBack" title="Kembali"></button>
+              <button class="icon-btn" data-cmd="previewReload" title="Muat ulang"></button>
+              <input id="preview-url" class="input input-sm" value="http://localhost:5173" spellcheck="false" />
+              <button class="icon-btn" data-cmd="previewExternal" title="Buka di browser"></button>
+              <button class="icon-btn" data-cmd="previewClose" title="Tutup pratinjau"></button>
+            </div>
+            <div id="preview-host"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="resizer horizontal" id="resize-panel" data-target="panel"></div>
+      <section id="panel">
+        <header class="panel-head">
+          <div class="panel-tabs" id="term-tabs"></div>
+          <div class="view-actions">
+            <button class="icon-btn" data-cmd="newTerminal" title="Terminal baru"></button>
+            <button class="icon-btn" data-cmd="killTerminal" title="Tutup terminal"></button>
+            <button class="icon-btn" data-cmd="togglePanel" title="Sembunyikan panel"></button>
+          </div>
+        </header>
+        <div id="term-host"></div>
+      </section>
+    </main>
+
+    <div class="resizer" id="resize-agent" data-target="agentpanel"></div>
+    <!-- Agent panel -->
+    <aside id="agentpanel">
+      <header class="agent-head">
+        <select id="agent-select" class="select select-sm" title="Sesi agen"></select>
+        <div class="view-actions">
+          <button class="icon-btn" data-cmd="newAgent" title="Agen baru"></button>
+          <button class="icon-btn" data-cmd="agentUndo" title="Batalkan perubahan terakhir agen"></button>
+          <button class="icon-btn" data-cmd="agentClear" title="Bersihkan percakapan"></button>
+        </div>
+      </header>
+      <div id="todos" class="todos" hidden></div>
+      <div id="transcript" class="transcript"></div>
+      <div id="composer" class="composer">
+        <div id="attach-chips" class="chips"></div>
+        <div id="mention-menu" class="mention-menu" hidden></div>
+        <textarea id="prompt" rows="3" placeholder="Minta agen mengerjakan sesuatu...  (@ sebut berkas, / perintah)" spellcheck="false"></textarea>
+        <div class="composer-bar">
+          <select id="mode-select" class="select select-sm" title="Mode izin agen">
+            <option value="ask">Tanya dulu</option>
+            <option value="acceptEdits">Terima edit</option>
+            <option value="auto">Otomatis</option>
+            <option value="plan">Rencana</option>
+          </select>
+          <select id="model-select" class="select select-sm" title="Model TokenomixAI"></select>
+          <div class="spacer"></div>
+          <span id="usage" class="muted small"></span>
+          <button id="send-btn" class="btn btn-primary btn-sm" title="Kirim (Enter)">Kirim</button>
+          <button id="stop-btn" class="btn btn-danger btn-sm" title="Berhenti" hidden>Berhenti</button>
+        </div>
+      </div>
+    </aside>
+
+    <footer id="statusbar">
+      <span id="sb-branch" class="sb-item"></span>
+      <span id="sb-agent" class="sb-item"></span>
+      <div class="spacer"></div>
+      <span id="sb-cursor" class="sb-item"></span>
+      <span id="sb-lang" class="sb-item"></span>
+      <span id="sb-eol" class="sb-item"></span>
+      <span id="sb-model" class="sb-item"></span>
+    </footer>
+  </div>
+
+  <div id="overlay-root"></div>
+  <div id="toasts" class="toasts"></div>
+
+  <script src="../../node_modules/marked/lib/marked.umd.js"></script>
+  <script src="../../node_modules/dompurify/dist/purify.min.js"></script>
+  <script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="../../node_modules/monaco-editor/min/vs/loader.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

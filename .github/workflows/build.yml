@@ -1,0 +1,93 @@
+name: Build Windows installer
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\.cache\electron-builder
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Unit tests
+        run: npm test
+
+      - name: End-to-end test (dev)
+        run: npm run test:e2e
+
+      - name: Build installers (.exe + .msi)
+        run: npx electron-builder --win nsis msi --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: End-to-end test (packaged app)
+        shell: pwsh
+        run: node tests/e2e/run.js --packaged "release/win-unpacked/XZY IDE.exe"
+
+      - name: List output
+        shell: pwsh
+        run: Get-ChildItem release -File | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: e2e-output/
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XZY-IDE-installers
+          path: |
+            release/*.exe
+            release/*.msi
+          if-no-files-found: error
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Publish GitHub release
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: XZY IDE ${{ steps.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          body: |
+            Installer XZY IDE untuk Windows (64-bit).
+
+            - `XZY-IDE-Setup-${{ steps.version.outputs.version }}.exe` - installer biasa (disarankan)
+            - `XZY-IDE-${{ steps.version.outputs.version }}.msi` - paket MSI
+
+            Setelah dipasang, buka Pengaturan lalu isi API key TokenomixAI.
+            Build dari commit ${{ github.sha }}.
+          files: |
+            release/*.exe
+            release/*.msi
