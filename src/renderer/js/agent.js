@@ -259,7 +259,8 @@ function flushRenders() {
     const item = current && current.transcript.find((t) => t.id === id);
     if (el && item) {
       el.innerHTML = renderMarkdown(item.text);
-      el.classList.add('streaming');
+      // Typing cursor only while this is the last thing the agent is producing
+      el.classList.toggle('streaming', !!current && current.status === 'running' && el === $('#transcript').lastElementChild?.previousElementSibling);
       decorateCode(el);
     }
   }
@@ -376,6 +377,7 @@ function onAgentEvent(e) {
   const tr = $('#transcript');
   switch (e.type) {
     case 'transcript': {
+      for (const s of tr.querySelectorAll('.streaming')) s.classList.remove('streaming');
       const empty = tr.querySelector('.agent-empty');
       if (empty) empty.remove();
       current.transcript.push(e.item);
@@ -423,6 +425,7 @@ function onAgentEvent(e) {
       break;
     }
     case 'permission': {
+      for (const s of tr.querySelectorAll('.streaming')) s.classList.remove('streaming');
       const card = renderPermission(e);
       if (statusEl && statusEl.parentNode === tr) tr.insertBefore(card, statusEl); else tr.append(card);
       scrollDown(true);
@@ -463,6 +466,7 @@ function onAgentEvent(e) {
       renderTodos();
       break;
     case 'turn_end':
+      flushRenders();
       for (const el of tr.querySelectorAll('.streaming')) el.classList.remove('streaming');
       if (e.summary) Object.assign(current, { status: e.summary.status, todos: e.summary.todos, usage: e.summary.usage, canUndo: e.summary.canUndo });
       updateStatusLine('idle');

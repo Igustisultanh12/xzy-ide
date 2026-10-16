@@ -173,6 +173,7 @@ async function main() {
     await win.waitForSelector('.tree-row[data-path="hello.txt"]', { timeout: 15000 });
     check(true, 'explorer ikut menampilkan berkas baru dari agen');
 
+    await win.waitForTimeout(400);
     await win.screenshot({ path: path.join(outDir, `${tag}-1-agent.png`) });
 
     // Ask mode: the edit waits for approval with a diff
@@ -181,6 +182,7 @@ async function main() {
     await win.click('#send-btn');
     await win.waitForSelector('.permission .mini-diff', { timeout: 30000 });
     check(fs.readFileSync(path.join(ws, 'hello.txt'), 'utf8') === 'Halo dari agen XZY\n', 'mode Tanya: berkas belum diubah sebelum disetujui');
+    await win.waitForTimeout(400);
     await win.screenshot({ path: path.join(outDir, `${tag}-2-permission.png`) });
     await win.click('.permission .btn-primary');
     await win.waitForFunction(() => document.querySelector('#transcript').innerText.includes('Baris kedua sudah ditambahkan'), null, { timeout: 30000 });
@@ -189,12 +191,14 @@ async function main() {
     await win.keyboard.press('Control+Shift+P');
     await win.waitForSelector('.palette input', { timeout: 5000 });
     await win.keyboard.type('terminal');
+    await win.waitForTimeout(400);
     await win.screenshot({ path: path.join(outDir, `${tag}-3-palette.png`) });
     await win.keyboard.press('Escape');
     check(true, 'palet perintah bisa dibuka');
 
     await win.keyboard.press('Control+,');
     await win.waitForSelector('.modal', { timeout: 5000 });
+    await win.waitForTimeout(400);
     await win.screenshot({ path: path.join(outDir, `${tag}-4-settings.png`) });
     await win.keyboard.press('Escape');
     check(true, 'dialog pengaturan bisa dibuka');

@@ -53,7 +53,7 @@ body {
   color: var(--text);
   font-family: var(--font);
   font-size: 13px;
-  overflow: hidden;
+  overflow: clip;
   user-select: none;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -74,13 +74,15 @@ kbd {
 /* ---------- layout ---------- */
 #app {
   display: grid;
-  grid-template-columns: 48px var(--sidebar-w) 4px minmax(300px, 1fr) 4px var(--agent-w);
+  /* Side panels shrink with the window so the layout never overflows */
+  grid-template-columns: 48px min(var(--sidebar-w), 26vw) 4px minmax(240px, 1fr) 4px min(var(--agent-w), 40vw);
   grid-template-rows: 1fr 24px;
   height: 100vh;
+  overflow: clip;
 }
-#app.sidebar-hidden { grid-template-columns: 48px 0 0 minmax(300px, 1fr) 4px var(--agent-w); }
-#app.agent-hidden { grid-template-columns: 48px var(--sidebar-w) 4px minmax(300px, 1fr) 0 0; }
-#app.sidebar-hidden.agent-hidden { grid-template-columns: 48px 0 0 minmax(300px, 1fr) 0 0; }
+#app.sidebar-hidden { grid-template-columns: 48px 0 0 minmax(240px, 1fr) 4px min(var(--agent-w), 45vw); }
+#app.agent-hidden { grid-template-columns: 48px min(var(--sidebar-w), 30vw) 4px minmax(240px, 1fr) 0 0; }
+#app.sidebar-hidden.agent-hidden { grid-template-columns: 48px 0 0 minmax(240px, 1fr) 0 0; }
 #app.sidebar-hidden #sidebar, #app.agent-hidden #agentpanel { overflow: hidden; visibility: hidden; }
 
 #activitybar {
