@@ -201,8 +201,9 @@ kbd {
 .tabbar { height: 36px; display: flex; background: var(--bg-2); border-bottom: 1px solid var(--line); flex: none; min-width: 0; }
 .tabs { height: 36px; display: flex; overflow-x: auto; overflow-y: hidden; flex: 1; min-width: 0; }
 .editor-actions { display: flex; align-items: center; gap: 4px; padding: 0 6px; flex: none; border-left: 1px solid var(--line); }
-.editor-actions .select { max-width: 170px; }
-.btn-ok:hover { filter: brightness(1.08); }
+.editor-actions .select { max-width: 150px; }
+@media (max-width: 1100px) { .editor-actions .select { max-width: 110px; } }
+.btn-ok:hover { background: var(--ok); filter: brightness(1.1); }
 .gh-run { display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-radius: 6px; cursor: pointer; color: var(--text-2); font-size: 12px; }
 .gh-run:hover { background: var(--bg-3); }
 .gh-run .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
