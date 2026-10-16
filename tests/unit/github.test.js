@@ -140,3 +140,29 @@ test('extractLog trims to the budget', () => {
   const big = Array.from({ length: 5000 }, (_, i) => `line ${i} error here`).join('\n');
   assert.ok(extractLog(big, 3000).length <= 3100);
 });
+
+test('workflow-scope refusal is explained with the token scopes, not as "remote is newer"', async () => {
+  const remotes = fs.mkdtempSync(path.join(os.tmpdir(), 'xzy-remotes-wf-'));
+  fs.mkdirSync(path.join(remotes, 'u'));
+  const bare = path.join(remotes, 'u', 'app.git');
+  execFileSync('git', ['init', '--bare', '-b', 'main', bare]);
+  // Simulate GitHub's refusal for workflow files
+  const hook = path.join(bare, 'hooks', 'pre-receive');
+  fs.writeFileSync(hook, '#!/bin/sh\necho "refusing to allow a Personal Access Token to create or update workflow `.github/workflows/android-build.yml` without `workflow` scope" >&2\nexit 1\n');
+  fs.chmodSync(hook, 0o755);
+  const root = tmpWorkspace({ 'ai/.github/workflows/android-build.yml': 'on: push\n', 'ai/README.md': '# app\n' });
+  const emptyCfg = path.join(remotes, 'empty.gitconfig');
+  fs.writeFileSync(emptyCfg, '');
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: emptyCfg, GIT_CONFIG_NOSYSTEM: '1' };
+  const gitBase = process.platform === 'win32' ? `file:///${remotes.replace(/\\/g, '/')}` : `file://${remotes}`;
+  const gh = new GitHub({ token: 'tok', gitBase, env, fetchImpl: router([[/GET .*\/user$/, () => json({ login: 'u', id: 1 }, 200, { 'x-oauth-scopes': 'repo, read:org' })]]) });
+
+  // The repo lives in the "ai" subfolder of the workspace (tool param path: "ai")
+  const tools = require('../../src/main/tools');
+  await assert.rejects(
+    tools.execute(root, 'github_push', { path: 'ai', repo: 'u/app', message: 'add workflow' }, { github: gh }),
+    (e) => /izin workflow/.test(e.message) && /@u/.test(e.message) && /repo, read:org/.test(e.message) && !/belum ada di lokal/.test(e.message),
+  );
+  assert.ok(fs.existsSync(path.join(root, 'ai', '.git')), 'git repo created in the subfolder, not the workspace root');
+  assert.ok(!fs.existsSync(path.join(root, '.git')));
+});

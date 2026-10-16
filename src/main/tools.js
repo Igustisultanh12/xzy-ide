@@ -75,23 +75,23 @@ function definitions({ planMode = false } = {}) {
     fn('open_preview', 'Membuka URL (mis. http://localhost:5173) di panel pratinjau browser IDE agar pengguna bisa melihat hasilnya.', { url: { type: 'string' } }, ['url']),
     fn('check_toolchain', 'Daftar runtime/compiler yang terpasang di komputer pengguna beserta versinya (PHP, Java, Python, Node, Go, Rust, .NET, GCC, Git, dll) dan ID winget untuk memasang yang belum ada.', { refresh: { type: 'boolean' } }),
     fn('run_configs', 'Konfigurasi run yang terdeteksi dari proyek (mis. php artisan serve, npm run dev, gradlew assembleDebug, mvn spring-boot:run, go run .).'),
-    fn('github_repo_info', 'Info repo GitHub (default branch, izin push, ada workflow atau tidak). Tanpa argumen repo memakai remote origin workspace.', { repo: { type: 'string', description: 'pemilik/repo atau link GitHub (opsional)' } }),
+    fn('github_repo_info', 'Info repo GitHub (default branch, izin push, ada workflow atau tidak) dan izin token (scope workflow). Tanpa argumen repo memakai remote origin.', { path: { type: 'string', description: 'Subfolder repo git di dalam workspace jika repo bukan di root (mis. "ai")' }, repo: { type: 'string', description: 'pemilik/repo atau link GitHub (opsional)' } }),
     fn('github_create_repo', 'Membuat repo GitHub baru di akun pengguna (dipakai bila workspace belum punya repo). Jika sudah ada, repo itu dipakai.', {
       name: { type: 'string' }, private: { type: 'boolean', description: 'default true' }, description: { type: 'string' },
     }, ['name']),
-    fn('github_push', 'Commit semua perubahan workspace lalu push ke GitHub memakai token pengguna (git init dan remote origin dibuat otomatis bila belum ada). Tanpa force push. Mengembalikan commit_sha untuk dipantau.', {
-      message: { type: 'string', description: 'Pesan commit yang jelas' },
+    fn('github_push', 'Commit semua perubahan lalu push ke GitHub memakai token dari Pengaturan XZY IDE (git init dan remote origin dibuat otomatis bila belum ada). Tanpa force push. Mengembalikan commit_sha untuk dipantau. Jika repo git ada di subfolder workspace, isi path.', {
+      path: { type: 'string', description: 'Subfolder repo git di dalam workspace jika repo bukan di root (mis. "ai")' }, message: { type: 'string', description: 'Pesan commit yang jelas' },
       repo: { type: 'string', description: 'pemilik/repo atau link (opsional jika origin sudah ada)' },
       branch: { type: 'string', description: 'Branch tujuan (default: branch saat ini)' },
     }, ['message']),
     fn('github_pull', 'Mengambil perubahan terbaru dari GitHub (git pull --rebase) memakai token pengguna. Dipakai jika push ditolak karena remote lebih baru.', {
-      repo: { type: 'string' }, branch: { type: 'string' },
+      path: { type: 'string', description: 'Subfolder repo git di dalam workspace jika repo bukan di root (mis. "ai")' }, repo: { type: 'string' }, branch: { type: 'string' },
     }),
     fn('github_workflow_runs', 'Daftar workflow run GitHub Actions terbaru (status/hasil) untuk repo, branch, atau commit.', {
-      repo: { type: 'string' }, branch: { type: 'string' }, head_sha: { type: 'string' },
+      path: { type: 'string', description: 'Subfolder repo git di dalam workspace jika repo bukan di root (mis. "ai")' }, repo: { type: 'string' }, branch: { type: 'string' }, head_sha: { type: 'string' },
     }),
     fn('github_wait_workflow', 'Menunggu GitHub Actions selesai untuk commit (head_sha dari github_push) atau run_id, lalu mengembalikan hasil (success/failure, artifact, release). Bisa menunggu hingga 20 menit; panggil lagi jika still_running.', {
-      repo: { type: 'string' }, head_sha: { type: 'string' }, run_id: { type: 'integer' }, branch: { type: 'string' },
+      path: { type: 'string', description: 'Subfolder repo git di dalam workspace jika repo bukan di root (mis. "ai")' }, repo: { type: 'string' }, head_sha: { type: 'string' }, run_id: { type: 'integer' }, branch: { type: 'string' },
     }),
     fn('github_workflow_logs', 'Membaca penyebab workflow run gagal: job dan step yang gagal, anotasi error (file:baris), dan potongan log yang relevan.', {
       repo: { type: 'string' }, run_id: { type: 'integer' },
@@ -461,20 +461,24 @@ async function execute(root, name, args, ctx = {}) {
     }
     case 'run_configs':
       return { configs: detectConfigs(root) };
-    case 'github_repo_info': return gh(ctx).repoInfo(root, args.repo);
+    case 'github_repo_info': {
+      const info = await gh(ctx).repoInfo(repoDir(root, args), args.repo);
+      try { info.token = await gh(ctx).tokenInfo(); } catch { /* optional */ }
+      return info;
+    }
     case 'github_create_repo': return gh(ctx).createRepo(args);
-    case 'github_push': return gh(ctx).push(root, { ...args, onOutput: ctx.onOutput });
-    case 'github_pull': return gh(ctx).pull(root, { ...args, onOutput: ctx.onOutput });
-    case 'github_workflow_runs': return gh(ctx).listRuns(root, args);
+    case 'github_push': return gh(ctx).push(repoDir(root, args), { ...args, onOutput: ctx.onOutput });
+    case 'github_pull': return gh(ctx).pull(repoDir(root, args), { ...args, onOutput: ctx.onOutput });
+    case 'github_workflow_runs': return gh(ctx).listRuns(repoDir(root, args), args);
     case 'github_wait_workflow':
-      return gh(ctx).waitRuns(root, { ...args, maxSeconds: ctx.ciWaitSeconds || 1200 }, {
+      return gh(ctx).waitRuns(repoDir(root, args), { ...args, maxSeconds: ctx.ciWaitSeconds || 1200 }, {
         onStatus: ctx.onStatus || (() => {}),
         shouldStop: () => !!(ctx.signal && ctx.signal.aborted),
       });
-    case 'github_workflow_logs': return gh(ctx).failureDetails(root, args);
-    case 'github_rerun_workflow': return gh(ctx).rerun(root, args);
-    case 'github_dispatch_workflow': return gh(ctx).dispatch(root, args);
-    case 'github_list_releases': return gh(ctx).listReleases(root, args);
+    case 'github_workflow_logs': return gh(ctx).failureDetails(repoDir(root, args), args);
+    case 'github_rerun_workflow': return gh(ctx).rerun(repoDir(root, args), args);
+    case 'github_dispatch_workflow': return gh(ctx).dispatch(repoDir(root, args), args);
+    case 'github_list_releases': return gh(ctx).listReleases(repoDir(root, args), args);
     case 'github_create_release': return gh(ctx).createRelease(root, args);
     case 'todo_write': {
       const todos = Array.isArray(args.todos) ? args.todos.filter((t) => t && t.content).map((t) => ({
@@ -506,6 +510,11 @@ async function execute(root, name, args, ctx = {}) {
     default:
       throw new ToolError(`Tool tidak dikenal: ${name}`);
   }
+}
+
+/** Folder of the git repo the GitHub tool works on (workspace root or a subfolder). */
+function repoDir(root, args) {
+  return args && args.path ? resolveInside(root, args.path) : root;
 }
 
 function gh(ctx) {

@@ -90,6 +90,15 @@ class GitHub {
     return s;
   }
 
+  /** Login and scopes of the configured token (scopes null = fine-grained token). */
+  async tokenInfo() {
+    const res = await this.api('GET', '/user', null, { raw: true });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new GitHubError(`Token GitHub tidak valid (HTTP ${res.status}).`);
+    const scopes = res.headers.get('x-oauth-scopes');
+    return { login: json.login, scopes, fineGrained: scopes === null, hasWorkflow: scopes === null ? null : scopes.split(',').map((s) => s.trim()).includes('workflow') };
+  }
+
   async me() {
     if (!this.user) this.user = await this.api('GET', '/user');
     return this.user;
@@ -187,11 +196,14 @@ class GitHub {
     onOutput(mask(`${p.out}\n${p.err}\n`, this.token));
     if (!p.ok) {
       const errText = mask(p.err || p.out, this.token);
-      if (/rejected|non-fast-forward|fetch first/i.test(errText)) {
-        throw new GitHubError(`Push ditolak karena branch ${target} di GitHub punya commit yang belum ada di lokal. Jalankan github_pull (rebase) dulu, selesaikan konflik jika ada, lalu push lagi. Detail: ${errText}`);
+      // Check the workflow refusal first: it also contains "[remote rejected]"
+      if (/workflow/i.test(errText) && /scope|permission|refusing/i.test(errText)) {
+        const t = await this.tokenInfo().catch(() => null);
+        const who = t ? `Token GitHub di Pengaturan XZY IDE (@${t.login}) ${t.fineGrained ? 'adalah fine-grained token tanpa izin Workflows = Read and write' : `hanya punya scope: ${t.scopes || '(kosong)'}`}.` : '';
+        throw new GitHubError(`GitHub menolak push karena commit ini mengubah berkas .github/workflows dan token belum punya izin workflow. ${who} Perbaiki: classic token -> centang scope "workflow" (dan "repo") di https://github.com/settings/tokens; fine-grained -> Workflows = Read and write. Lalu tempel token itu di Pengaturan XZY IDE > Token GitHub, klik Tes token, Simpan, dan minta agen push lagi. Jangan memakai git push di terminal (itu memakai kredensial Windows, bukan token XZY IDE). Detail: ${errText}`);
       }
-      if (/workflow/i.test(errText) && /scope|permission/i.test(errText)) {
-        throw new GitHubError(`Token tidak boleh mengubah berkas .github/workflows. Tambahkan scope "workflow" (classic) atau Workflows = Read and write (fine-grained). Detail: ${errText}`);
+      if (/non-fast-forward|fetch first|\[rejected\]/i.test(errText)) {
+        throw new GitHubError(`Push ditolak karena branch ${target} di GitHub punya commit yang belum ada di lokal. Jalankan github_pull (rebase) dulu, selesaikan konflik jika ada, lalu push lagi. Detail: ${errText}`);
       }
       throw new GitHubError(`git push gagal: ${errText}`);
     }

@@ -1,7 +1,7 @@
 {
   "name": "xzy-ide",
   "productName": "XZY IDE",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "XZY IDE - editor kode agentik untuk Windows dengan agen AI dari TokenomixAI",
   "main": "src/main/main.js",
   "author": {
