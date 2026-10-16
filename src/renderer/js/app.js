@@ -281,7 +281,10 @@ async function boot() {
   try {
     await initMonaco();
   } catch (e) {
-    errorToast(new Error(`Editor gagal dimuat: ${e.message || e}`));
+    const detail = e && (e.message || (e.originalError && e.originalError.message) || JSON.stringify(e));
+    window.__xzyMonacoError = String(detail);
+    console.error('Monaco load failed', detail, e);
+    errorToast(new Error(`Editor gagal dimuat: ${detail}`));
   }
   applyEditorSettings(state.settings);
   initExplorer();

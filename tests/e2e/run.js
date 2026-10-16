@@ -102,18 +102,32 @@ async function main() {
   const app = await electron.launch(launch);
 
   const errors = [];
+  const logs = [];
   let win;
   try {
     win = await app.firstWindow();
     win.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
     win.on('console', (m) => {
+      logs.push(`[${m.type()}] ${m.text()}`);
       if (m.type() === 'error') errors.push(`console: ${m.text()}`);
     });
+    win.on('requestfailed', (r) => logs.push(`[requestfailed] ${r.url()} ${r.failure() && r.failure().errorText}`));
+    win.on('response', (r) => { if (r.status() >= 400) logs.push(`[http ${r.status()}] ${r.url()}`); });
     await win.waitForFunction(() => window.__xzyReady === true || window.__xzyBootError, null, { timeout: 90000 });
     const bootError = await win.evaluate(() => window.__xzyBootError || null);
     check(!bootError, `aplikasi boot tanpa error ${bootError || ''}`);
 
-    check(await win.evaluate(() => !!window.monaco && !!document.querySelector('#editor .monaco-editor')), 'editor Monaco termuat');
+    const diag = await win.evaluate(() => ({
+      monaco: !!window.monaco,
+      editorDom: !!document.querySelector('#editor .monaco-editor'),
+      amd: typeof window.require,
+      define: typeof window.define,
+      monacoError: window.__xzyMonacoError || null,
+      toasts: document.querySelector('#toasts').innerText,
+      href: location.href,
+    }));
+    console.log('  diag', JSON.stringify(diag));
+    check(diag.monaco && diag.editorDom, 'editor Monaco termuat');
     await win.waitForSelector('.tree-row[data-path="readme.md"]', { timeout: 20000 });
     check(true, 'explorer menampilkan berkas workspace');
 
@@ -154,6 +168,7 @@ async function main() {
     if (win) await win.screenshot({ path: path.join(outDir, `failure-${packagedExe ? 'packaged' : 'dev'}.png`) }).catch(() => {});
     console.error(e.message);
     if (errors.length) console.error('Error console:\n' + errors.join('\n'));
+    console.error('Log renderer:\n' + logs.slice(-60).join('\n'));
     process.exitCode = 1;
   } finally {
     await app.close().catch(() => {});
