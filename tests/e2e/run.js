@@ -119,7 +119,7 @@ async function main() {
 
     const diag = await win.evaluate(() => ({
       monaco: !!window.monaco,
-      editorDom: !!document.querySelector('#editor .monaco-editor'),
+      editorDom: !!(window.monaco && window.monaco.editor.getEditors().length),
       amd: typeof window.require,
       define: typeof window.define,
       monacoError: window.__xzyMonacoError || null,
@@ -135,6 +135,7 @@ async function main() {
     await win.waitForSelector('.tree-row[data-path="src/app.js"]', { timeout: 10000 });
     await win.click('.tree-row[data-path="src/app.js"]');
     await win.waitForSelector('.tab.active', { timeout: 10000 });
+    await win.waitForSelector('#editor .monaco-editor .view-lines', { timeout: 10000 });
     const value = await win.evaluate(() => window.monaco.editor.getModels().map((m) => m.getValue()).join('\n'));
     check(value.includes('return "halo"'), 'berkas terbuka di editor');
 
