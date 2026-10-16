@@ -30,7 +30,8 @@ export async function newTerminal() {
   const fit = new window.FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(el);
-  const entry = { term, fit, el, title: `Terminal ${counter}` };
+  const entry = { term, fit, el, title: `Terminal ${counter}`, gotData: false };
+  entry.ready = new Promise((resolve) => { entry.markReady = resolve; });
   terms.set(id, entry);
   term.onData((d) => api.term.write(id, d));
   term.attachCustomKeyEventHandler((e) => {
@@ -119,7 +120,8 @@ export async function runInNamedTerminal(name, cmd) {
     t.name = name;
     t.title = name;
     renderTabs();
-    await new Promise((r) => setTimeout(r, 1200)); // let the shell start
+    // Wait for the shell's first output (its prompt) before typing
+    await Promise.race([t.ready, new Promise((r) => setTimeout(r, 8000))]);
   }
   activate(id);
   api.term.write(id, `${cmd}\r`);
@@ -141,7 +143,12 @@ export function applyTerminalTheme() {
 }
 
 export function initTerminal() {
-  api.term.onData(({ id, data }) => { const t = terms.get(id); if (t) t.term.write(data); });
+  api.term.onData(({ id, data }) => {
+    const t = terms.get(id);
+    if (!t) return;
+    t.term.write(data);
+    if (!t.gotData) { t.gotData = true; setTimeout(() => t.markReady(), 300); }
+  });
   api.term.onExit(({ id, code }) => {
     const t = terms.get(id);
     if (t) t.term.write(`\r\n\x1b[90m[proses selesai dengan kode ${code}]\x1b[0m\r\n`);

@@ -219,7 +219,15 @@ async function main() {
     check(real.length === 0, `tidak ada error di console${real.length ? `:\n${real.join('\n')}` : ''}`);
     console.log('\nE2E LULUS');
   } catch (e) {
-    if (win) await win.screenshot({ path: path.join(outDir, `failure-${packagedExe ? 'packaged' : 'dev'}.png`) }).catch(() => {});
+    if (win) {
+      await win.screenshot({ path: path.join(outDir, `failure-${packagedExe ? 'packaged' : 'dev'}.png`) }).catch(() => {});
+      const ui = await win.evaluate(() => ({
+        toasts: document.querySelector('#toasts').innerText,
+        terminals: [...document.querySelectorAll('.term-view')].map((v) => v.innerText.slice(-800)),
+        tabs: [...document.querySelectorAll('.panel-tab')].map((t) => t.innerText),
+      })).catch(() => null);
+      console.error('UI saat gagal:', JSON.stringify(ui, null, 2));
+    }
     console.error(e.message);
     if (errors.length) console.error('Error console:\n' + errors.join('\n'));
     console.error('Log renderer:\n' + logs.slice(-60).join('\n'));

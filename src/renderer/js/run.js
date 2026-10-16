@@ -31,10 +31,9 @@ export async function refreshRunConfigs() {
   else if (configs.length && !activePath()) sel.value = configs[0].id;
 }
 
-function offerInstall(tool, cmd) {
+function warnMissing(tool) {
   const how = tool.winget ? `winget install --id ${tool.winget} -e` : tool.hint || 'pemasang resminya';
-  toast(`${tool.label} belum terpasang. Minta agen memasangnya (${how}), atau pasang manual lalu klik Jalankan lagi.`, 'error', 8000);
-  emit('agent:insert', `${tool.label} belum terpasang di komputer ini. Pasang ${tool.label} (mis. ${how}), pastikan perintahnya bisa dipakai, lalu jalankan: ${cmd}`);
+  toast(`${tool.label} sepertinya belum terpasang. Jika perintah gagal, pasang dengan ${how} atau minta agen memasangnya.`, 'error', 8000);
 }
 
 export async function run() {
@@ -57,9 +56,9 @@ export async function run() {
   }
   if (!cfg) return;
   if (cfg.preview) { emit('preview:open', cfg.preview); return; }
-  if (!toolchain) await loadToolchain();
+  // Detection only warns: the terminal shows the real error if the runtime is missing
   const miss = missing(cfg.needs);
-  if (miss) { offerInstall(miss, cfg.command); return; }
+  if (miss) warnMissing(miss);
   if (cfg.note) toast(cfg.note, 'info', 5000);
   await runInNamedTerminal('Run', cfg.command);
   if (cfg.server) {
