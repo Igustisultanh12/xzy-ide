@@ -41,7 +41,24 @@ function startFakeGateway() {
         return;
       }
       if (req.url === '/v1/chat/completions') {
-        const toolMsgs = (json.messages || []).filter((m) => m.role === 'tool');
+        const msgs = json.messages || [];
+        let lastUser = -1;
+        msgs.forEach((m, i) => { if (m.role === 'user') lastUser = i; });
+        const toolMsgs = msgs.slice(lastUser + 1).filter((m) => m.role === 'tool');
+        const userText = lastUser >= 0 ? String(msgs[lastUser].content) : '';
+        if (userText.includes('Tambahkan baris')) {
+          if (toolMsgs.length === 0) {
+            sse(res, [
+              { choices: [{ delta: { content: 'Saya tambahkan barisnya.' } }] },
+              { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_e1', function: { name: 'edit_file', arguments: JSON.stringify({ path: 'hello.txt', old_string: 'Halo dari agen XZY\n', new_string: 'Halo dari agen XZY\nBaris kedua\n' }) } }] } }] },
+              { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+              '[DONE]',
+            ]);
+          } else {
+            sse(res, [{ choices: [{ delta: { content: 'Baris kedua sudah ditambahkan ke **hello.txt**.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }, '[DONE]']);
+          }
+          return;
+        }
         if (toolMsgs.length === 0) {
           sse(res, [
             { choices: [{ delta: { content: 'Saya buat berkasnya.' } }] },
@@ -101,6 +118,7 @@ async function main() {
   console.log(`Menjalankan ${packagedExe ? `aplikasi terpaket ${packagedExe}` : 'electron .'}`);
   const app = await electron.launch(launch);
 
+  const tag = packagedExe ? 'packaged' : 'dev';
   const errors = [];
   const logs = [];
   let win;
@@ -155,12 +173,31 @@ async function main() {
     await win.waitForSelector('.tree-row[data-path="hello.txt"]', { timeout: 15000 });
     check(true, 'explorer ikut menampilkan berkas baru dari agen');
 
+    await win.screenshot({ path: path.join(outDir, `${tag}-1-agent.png`) });
+
+    // Ask mode: the edit waits for approval with a diff
+    await win.selectOption('#mode-select', 'ask');
+    await win.fill('#prompt', 'Tambahkan baris kedua ke hello.txt');
+    await win.click('#send-btn');
+    await win.waitForSelector('.permission .mini-diff', { timeout: 30000 });
+    check(fs.readFileSync(path.join(ws, 'hello.txt'), 'utf8') === 'Halo dari agen XZY\n', 'mode Tanya: berkas belum diubah sebelum disetujui');
+    await win.screenshot({ path: path.join(outDir, `${tag}-2-permission.png`) });
+    await win.click('.permission .btn-primary');
+    await win.waitForFunction(() => document.querySelector('#transcript').innerText.includes('Baris kedua sudah ditambahkan'), null, { timeout: 30000 });
+    check(fs.readFileSync(path.join(ws, 'hello.txt'), 'utf8') === 'Halo dari agen XZY\nBaris kedua\n', 'setelah disetujui, edit diterapkan');
+
     await win.keyboard.press('Control+Shift+P');
     await win.waitForSelector('.palette input', { timeout: 5000 });
+    await win.keyboard.type('terminal');
+    await win.screenshot({ path: path.join(outDir, `${tag}-3-palette.png`) });
     await win.keyboard.press('Escape');
     check(true, 'palet perintah bisa dibuka');
 
-    await win.screenshot({ path: path.join(outDir, packagedExe ? 'packaged.png' : 'dev.png') });
+    await win.keyboard.press('Control+,');
+    await win.waitForSelector('.modal', { timeout: 5000 });
+    await win.screenshot({ path: path.join(outDir, `${tag}-4-settings.png`) });
+    await win.keyboard.press('Escape');
+    check(true, 'dialog pengaturan bisa dibuka');
 
     const real = errors.filter((e) => !/Autofill|DevTools|Electron Security Warning|favicon|ResizeObserver loop/i.test(e));
     check(real.length === 0, `tidak ada error di console${real.length ? `:\n${real.join('\n')}` : ''}`);

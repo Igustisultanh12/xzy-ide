@@ -91,3 +91,4 @@ jobs:
           files: |
             release/*.exe
             release/*.msi
+            e2e-output/packaged-*.png
