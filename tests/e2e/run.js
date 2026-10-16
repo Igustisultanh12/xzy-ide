@@ -188,6 +188,18 @@ async function main() {
     await win.waitForFunction(() => document.querySelector('#transcript').innerText.includes('Baris kedua sudah ditambahkan'), null, { timeout: 30000 });
     check(fs.readFileSync(path.join(ws, 'hello.txt'), 'utf8') === 'Halo dari agen XZY\nBaris kedua\n', 'setelah disetujui, edit diterapkan');
 
+    // Run button / F5 runs the active file in a "Run" terminal
+    fs.writeFileSync(path.join(ws, 'run-me.js'), 'console.log("RUN-OK-" + (6 * 7));\n');
+    await win.waitForSelector('.tree-row[data-path="run-me.js"]', { timeout: 15000 });
+    await win.click('.tree-row[data-path="run-me.js"]');
+    await win.waitForFunction(() => document.querySelector('.tab.active .label')?.textContent === 'run-me.js', null, { timeout: 10000 });
+    await win.selectOption('#run-config', 'file');
+    await win.click('#run-btn');
+    await win.waitForFunction(() => [...document.querySelectorAll('.term-view')].some((v) => v.innerText.includes('RUN-OK-42')), null, { timeout: 60000 });
+    check(true, 'tombol Jalankan menjalankan berkas aktif di terminal Run');
+    await win.waitForTimeout(400);
+    await win.screenshot({ path: path.join(outDir, `${tag}-5-run.png`) });
+
     await win.keyboard.press('Control+Shift+P');
     await win.waitForSelector('.palette input', { timeout: 5000 });
     await win.keyboard.type('terminal');

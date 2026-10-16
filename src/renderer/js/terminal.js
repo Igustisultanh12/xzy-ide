@@ -48,7 +48,7 @@ export async function newTerminal() {
   activate(id);
   try {
     const info = await api.term.create(id, { cols: term.cols, rows: term.rows });
-    entry.title = info.shell.replace(/\.exe$/i, '');
+    if (!entry.name) entry.title = info.shell.replace(/\.exe$/i, '');
     renderTabs();
     setTimeout(() => fitActive(), 50);
   } catch (e) {
@@ -103,6 +103,31 @@ export function focusTerminal() {
   const t = terms.get(activeId);
   if (t) t.term.focus();
   return activeId;
+}
+
+/** Run a command in a terminal with a fixed name (e.g. "Run"), creating it when needed. */
+export async function runInNamedTerminal(name, cmd) {
+  document.getElementById('app').classList.remove('panel-hidden');
+  let id = [...terms.entries()].find(([, t]) => t.name === name)?.[0];
+  if (id) {
+    interruptNamedTerminal(name);
+    await new Promise((r) => setTimeout(r, 250));
+  } else {
+    id = await newTerminal();
+    if (!id) return;
+    const t = terms.get(id);
+    t.name = name;
+    t.title = name;
+    renderTabs();
+    await new Promise((r) => setTimeout(r, 1200)); // let the shell start
+  }
+  activate(id);
+  api.term.write(id, `${cmd}\r`);
+}
+
+export function interruptNamedTerminal(name) {
+  const id = [...terms.entries()].find(([, t]) => t.name === name)?.[0];
+  if (id) api.term.write(id, '\x03');
 }
 
 /** Run a command in a visible terminal (from palette or agent suggestions). */

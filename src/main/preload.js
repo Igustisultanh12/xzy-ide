@@ -73,6 +73,15 @@ contextBridge.exposeInMainWorld('xzy', {
     commit: (message, all) => call('git:commit', message, all),
     run: (args) => call('git:run', args),
   },
+  toolchain: (force) => call('toolchain:detect', force),
+  run: {
+    configs: () => call('run:configs'),
+    file: (rel) => call('run:file', rel),
+  },
+  github: {
+    test: (token) => call('github:test', token),
+    runs: () => call('github:runs'),
+  },
   openExternal: (url) => call('shell:open', url),
   confirm: (message, detail) => call('dialog:confirm', message, detail),
   onMenu: (cb) => on('menu', cb),

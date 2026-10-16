@@ -144,6 +144,45 @@ function renderGit() {
   section('STAGED', staged);
   section('PERUBAHAN', changes);
   if (!gs.files.length) body.append(h('p', { class: 'muted', text: 'Tidak ada perubahan.' }));
+  renderActions(body);
+}
+
+/* ---------------- GitHub Actions ---------------- */
+
+let actionsTimer = null;
+async function renderActions(body) {
+  const box = h('div', { class: 'gh-actions' });
+  body.append(h('div', { class: 'git-section', text: 'GITHUB ACTIONS' }), box);
+  const actions = h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;margin-top:4px' },
+    h('button', { class: 'btn btn-sm', html: `${icon('upload')} Push oleh agen`, onclick: () => emit('agent:insert', 'Commit semua perubahan dengan pesan yang jelas lalu push ke GitHub (github_push). Jika repo punya workflow, pantau GitHub Actions sampai selesai dan perbaiki jika gagal.') }),
+    h('button', { class: 'btn btn-sm', html: `${icon('sparkles')} Sampai rilis`, onclick: () => emit('agent:insert', '/ship') }));
+  if (!state.settings || !state.settings.hasGithubToken) {
+    box.append(h('p', { class: 'muted small', text: 'Isi token GitHub di Pengaturan agar agen bisa push, memantau Actions, dan membuat release.' }));
+    box.append(actions);
+    return;
+  }
+  box.append(h('div', { class: 'muted small', text: 'Memuat...' }));
+  let r;
+  try { r = await api.github.runs(); } catch (e) { box.innerHTML = ''; box.append(h('p', { class: 'muted small', text: e.message }), actions); return; }
+  box.innerHTML = '';
+  if (!r.repo) {
+    box.append(h('p', { class: 'muted small', text: 'Workspace belum terhubung ke repo GitHub (remote origin). Minta agen membuat repo dan push.' }), actions);
+    return;
+  }
+  box.append(h('div', { class: 'muted small', style: 'margin-bottom:4px', text: r.repo }));
+  if (!r.runs.length) box.append(h('p', { class: 'muted small', text: 'Belum ada workflow run.' }));
+  let active = false;
+  for (const run of r.runs) {
+    const st = run.status === 'completed' ? run.conclusion : run.status;
+    if (run.status !== 'completed') active = true;
+    const row = h('div', { class: 'gh-run', title: `${run.workflow} · ${st}` },
+      h('span', { class: `gh-dot ${st}` }), h('span', { class: 't', text: `${run.workflow} · ${run.head_sha.slice(0, 7)}` }), h('span', { class: 'muted', text: st }));
+    row.addEventListener('click', () => api.openExternal(run.url));
+    box.append(row);
+  }
+  box.append(actions);
+  clearTimeout(actionsTimer);
+  if (active) actionsTimer = setTimeout(() => { if (!document.getElementById('view-git').hidden) refreshGit(); }, 20000);
 }
 
 async function gitRun(args, label) {

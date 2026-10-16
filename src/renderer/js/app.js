@@ -9,6 +9,7 @@ import { initTerminal, newTerminal, killAll, fitActive, applyTerminalTheme, focu
 import { initAgentPanel, loadAgents, renderModels, resetAgentPanel, invalidateFileIndex } from './agent.js';
 import { commandPalette, quickOpen, invalidateQuickOpen } from './palette.js';
 import { openSettings, loadModels } from './settings.js';
+import { initRun, refreshRunConfigs } from './run.js';
 
 const app = $('#app');
 let currentView = null;
@@ -117,6 +118,7 @@ async function enterWorkspace(ws) {
   refreshGit();
   await loadAgents();
   renderModels();
+  emit('workspace', ws);
   if (!app.classList.contains('panel-hidden')) newTerminal();
 }
 
@@ -256,6 +258,12 @@ function onKeyDown(e) {
   if (ctrl && k === 's' && !document.activeElement.closest('.monaco-editor')) { e.preventDefault(); saveActive(); }
 }
 
+let runCfgTimer = null;
+function runConfigsSoon() {
+  clearTimeout(runCfgTimer);
+  runCfgTimer = setTimeout(() => refreshRunConfigs(), 1500);
+}
+
 /* ---------------- boot ---------------- */
 
 async function boot() {
@@ -291,6 +299,7 @@ async function boot() {
   initSearch();
   initTerminal();
   initAgentPanel();
+  initRun();
 
   on('settings', (s) => { applyTheme(); renderWelcome(); renderModels(); void s; });
   on('models', () => renderModels());
@@ -305,6 +314,7 @@ async function boot() {
     refreshGitSoon();
     invalidateFileIndex();
     invalidateQuickOpen();
+    runConfigsSoon();
   });
 
   loadModels().then(() => renderModels());

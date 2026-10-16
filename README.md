@@ -34,8 +34,29 @@ Installer belum ditandatangani sertifikat code signing, jadi Windows SmartScreen
   - Seret berkas ke kolom chat untuk melampirkannya.
   - Berkas yang sedang dibuka dan teks yang dipilih ikut dikirim sebagai konteks.
   - `XZY.md`, `AGENTS.md` atau `CLAUDE.md` di root proyek dibaca otomatis sebagai instruksi proyek.
-- Perintah slash: `/init`, `/plan`, `/ask`, `/accept`, `/auto`, `/undo`, `/clear`, `/new`, `/help`.
+- Perintah slash: `/ship`, `/init`, `/plan`, `/ask`, `/accept`, `/auto`, `/undo`, `/clear`, `/new`, `/help`.
 - Model Claude memakai endpoint `/v1/messages` TokenomixAI. Model lain memakai `/v1/chat/completions`. Ada percobaan ulang otomatis untuk 429/502.
+
+**Jalankan semua bahasa**
+- Tombol **Jalankan** (F5) menjalankan berkas aktif: PHP, Java (berkas tunggal), Python, JavaScript/TypeScript, Go, Rust, C/C++, C#, Kotlin, Ruby, Dart, PowerShell, Bash. Berkas HTML dibuka di pratinjau.
+- Konfigurasi proyek terdeteksi otomatis:
+  - PHP/Laravel: `php artisan serve`, `php -S`, Composer
+  - Node: script `npm`/`pnpm`/`yarn`
+  - Java/Android: Gradle (termasuk `assembleDebug`/`assembleRelease`), Maven/Spring Boot
+  - Python: Django, pytest
+  - Lainnya: Go, Cargo, .NET, Flutter, Docker Compose
+- **Runtime terpasang** diperiksa otomatis (Pengaturan). Runtime yang belum ada bisa dipasang agen lewat `winget`, dan PATH baru langsung terbaca tanpa restart.
+
+**GitHub sampai rilis**
+- Isi token GitHub di Pengaturan. Agen bisa:
+  - membuat repo
+  - commit dan push dengan token (tanpa force push)
+  - pull/rebase jika remote lebih baru
+  - memantau GitHub Actions sampai selesai
+  - membaca penyebab gagal (step, anotasi file:baris, potongan log), memperbaiki, push lagi, dan menunggu lagi sampai hijau
+  - membuat release beserta unggahan berkas
+- `/ship` (atau tombol **Sampai rilis** di panel Source Control): agen menyelesaikan proyek, membuat workflow bila belum ada, push, memantau Actions, memperbaiki error, lalu merilis.
+- Panel Source Control menampilkan status GitHub Actions terbaru.
 
 **Editor**
 - Monaco (mesin editor VS Code): tab, syntax highlight, minimap, sticky scroll, format dokumen, pergi ke baris.
@@ -59,6 +80,7 @@ Installer belum ditandatangani sertifikat code signing, jadi Windows SmartScreen
 | Ctrl+Shift+F | Cari di workspace |
 | Ctrl+Shift+A | Agent Manager |
 | Ctrl+S | Simpan |
+| F5 / Shift+F5 | Jalankan / hentikan |
 
 ## Pengembangan
 

@@ -457,4 +457,5 @@ command('toggleWordWrap', 'Bungkus baris (word wrap)', async () => {
 command('gotoLine', 'Pergi ke baris', () => { if (editor) { editor.focus(); editor.getAction('editor.action.gotoLine')?.run(); } }, 'Ctrl+G');
 
 on('settings', (s) => applyEditorSettings(s));
+on('saveActiveSilently', () => { if (active && active.dirty) save(active); });
 export { esc };

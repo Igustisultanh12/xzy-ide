@@ -10,7 +10,9 @@ const SUGGESTIONS = [
   'Temukan dan perbaiki bug di berkas yang sedang terbuka',
   'Tambahkan unit test untuk fungsi utama lalu jalankan',
   'Buat XZY.md berisi panduan proyek untuk agen (/init)',
+  'Selesaikan proyek, push ke GitHub, pantau Actions sampai sukses, lalu rilis (/ship)',
 ];
+const SHIP_PROMPT = 'Selesaikan proyek ini sampai rilis: (1) pastikan kode lengkap dan bisa di-build/test secara lokal dengan runtime yang terpasang (pasang yang kurang), (2) jika belum ada, buat workflow GitHub Actions yang build, test, dan membuat release otomatis untuk jenis proyek ini, (3) github_push ke repo GitHub proyek (buat repo jika belum ada), (4) pantau GitHub Actions dengan github_wait_workflow sampai selesai; jika gagal, baca log dengan github_workflow_logs, perbaiki, push, dan tunggu lagi sampai sukses, (5) pastikan release terbit (buat dengan github_create_release jika workflow tidak membuatnya), lalu laporkan link release dan unduhannya.';
 
 let agents = [];               // summaries
 let currentId = null;
@@ -171,7 +173,7 @@ function emptyState() {
     h('div', { style: 'font-weight:600;color:var(--text)', text: 'Apa yang ingin dikerjakan?' }),
     h('div', { class: 'small', text: 'Agen bisa membaca proyek, menulis kode, menjalankan perintah, dan memverifikasi hasilnya.' }));
   const sug = h('div', { class: 'suggest' });
-  for (const s of SUGGESTIONS) sug.append(h('button', { text: s, onclick: () => { $('#prompt').value = s.endsWith('(/init)') ? '/init' : s; $('#prompt').focus(); } }));
+  for (const s of SUGGESTIONS) sug.append(h('button', { text: s, onclick: () => { const m = s.match(/\((\/\w+)\)$/); $('#prompt').value = m ? m[1] : s; $('#prompt').focus(); } }));
   box.append(sug);
   return box;
 }
@@ -224,6 +226,7 @@ function renderTool(item) {
     if (item.output) body.append(h('pre', { class: 'out', text: item.output }));
     if (item.error && item.status !== 'done') body.append(h('pre', { style: 'color:var(--err)', text: item.error }));
     if (item.diff && item.diff.path) body.append(h('button', { class: 'btn btn-sm', text: `Buka ${item.diff.path}`, onclick: () => openFile(item.diff.path) }));
+    if (item.link) body.append(h('button', { class: 'btn btn-sm', text: 'Buka di GitHub', onclick: () => api.openExternal(item.link) }));
     if (!body.childNodes.length) body.append(h('pre', { text: JSON.stringify(item.args || {}, null, 2) }));
   };
   head.addEventListener('click', () => { el.classList.toggle('open'); if (el.classList.contains('open')) fillBody(); });
@@ -307,7 +310,7 @@ function renderPermission(req) {
       }),
       h('button', { class: 'btn btn-danger btn-sm', text: 'Tolak', onclick: () => decide({ allow: false, feedback: feedback.value }) })));
   } else {
-    card.append(h('div', { class: 'q', text: 'Izinkan agen menjalankan perintah ini?' }));
+    card.append(h('div', { class: 'q', text: req.category === 'publish' ? 'Izinkan agen melakukan aksi GitHub ini?' : 'Izinkan agen menjalankan perintah ini?' }));
     card.append(h('pre', { text: `${req.cwd && req.cwd !== '.' ? `[${req.cwd}] ` : ''}${req.command}` }));
     card.append(h('div', { class: 'actions' },
       h('button', { class: 'btn btn-primary btn-sm', text: 'Jalankan', onclick: () => decide({ allow: true }) }),
@@ -575,6 +578,7 @@ const SLASH = {
   '/auto': 'Ganti ke mode Otomatis',
   '/init': 'Buat XZY.md (panduan proyek untuk agen)',
   '/new': 'Buat sesi agen baru',
+  '/ship': 'Selesaikan proyek, push ke GitHub, pantau Actions sampai sukses, lalu rilis',
   '/help': 'Tampilkan daftar perintah',
 };
 
@@ -594,6 +598,16 @@ async function handleSlash(text) {
     case '/new': newAgent(); return true;
     case '/help':
       toast(Object.entries(SLASH).map(([k, v]) => `${k}  ${v}`).join('\n'), 'info', 9000);
+      return true;
+    case '/ship':
+      if (!state.settings.hasGithubToken) { toast('Isi token GitHub di Pengaturan dulu agar agen bisa push dan memantau Actions.', 'error', 7000); emit('openSettings'); return true; }
+      if (current.mode === 'ask' || current.mode === 'plan') {
+        await api.agent.setMode(current.id, 'acceptEdits');
+        current.mode = 'acceptEdits';
+        syncControls();
+        toast('Mode diubah ke "Terima edit" supaya agen bisa bekerja lancar; perintah dan aksi GitHub tetap minta izin. Pilih "Otomatis" agar berjalan tanpa jeda.', 'info', 8000);
+      }
+      send(`${SHIP_PROMPT}${text.trim().length > 5 ? `\n\nCatatan pengguna: ${text.trim().slice(5).trim()}` : ''}`, true);
       return true;
     case '/init':
       send('Pelajari proyek ini (struktur folder, bahasa/framework, cara install, build, test, dan konvensi kode), lalu buat berkas XZY.md di root berisi panduan ringkas untuk agen AI yang akan bekerja di proyek ini. Jika XZY.md sudah ada, perbarui.', true);
@@ -714,6 +728,7 @@ export function initAgentPanel() {
   command('modeAuto', 'Agen: mode Otomatis', () => handleSlash('/auto'));
   command('modePlan', 'Agen: mode Rencana', () => handleSlash('/plan'));
   command('agentInit', 'Agen: buat XZY.md (/init)', () => handleSlash('/init'));
+  command('agentShip', 'Agen: kerjakan sampai rilis (push, pantau Actions, perbaiki, release)', () => handleSlash('/ship'));
 }
 
 export function resetAgentPanel() {

@@ -34,7 +34,7 @@ function sleep(ms, signal) {
 }
 
 class Agent extends EventEmitter {
-  constructor({ id, title, model, mode = 'ask', getRoot, getClient, getSettings }) {
+  constructor({ id, title, model, mode = 'ask', getRoot, getClient, getSettings, getGitHub, getEnvInfo }) {
     super();
     this.id = id || newId('agent');
     this.title = title || 'Agen baru';
@@ -43,6 +43,9 @@ class Agent extends EventEmitter {
     this.getRoot = getRoot;
     this.getClient = getClient;
     this.getSettings = getSettings || (() => ({}));
+    this.getGitHub = getGitHub || (() => null);
+    this.getEnvInfo = getEnvInfo || (async () => ({}));
+    this.envInfo = {};
     this.messages = [];        // OpenAI-format history (without system prompt)
     this.transcript = [];      // UI items, so a session can be shown again later
     this.todos = [];
@@ -50,7 +53,7 @@ class Agent extends EventEmitter {
     this.status = 'idle';
     this.usage = { prompt: 0, completion: 0 };
     this.pending = new Map();  // permission requestId -> resolve
-    this.alwaysAllow = { edit: false, exec: false };
+    this.alwaysAllow = { edit: false, exec: false, publish: false };
     this.abort = null;
     this.createdAt = Date.now();
     this.updatedAt = Date.now();
@@ -160,6 +163,19 @@ class Agent extends EventEmitter {
       '- Untuk dev server gunakan run_command dengan background=true, lalu open_preview ke URL-nya.',
       '- Hasil setiap tool dikirim kepadamu tepat setelah panggilannya; gunakan hasil itu. Jika error, baca pesannya dan perbaiki pendekatanmu.',
       '- Jangan pernah mengaku sudah melakukan sesuatu tanpa hasil tool yang sukses. Di akhir, ringkas apa yang diubah (berkas) dan cara mencobanya.',
+      '',
+      'Menjalankan kode (PHP, Java, Python, Node, Go, Rust, C/C++, .NET, Kotlin, Dart, dll):',
+      `- ${this.envInfo.toolchain || 'Gunakan check_toolchain untuk melihat runtime yang terpasang.'}`,
+      '- Gunakan run_configs untuk tahu cara menjalankan proyek, lalu jalankan dengan run_command (dev server: background=true lalu open_preview).',
+      '- Jika runtime yang dibutuhkan belum terpasang, pasang dengan winget (mis. `winget install --id Microsoft.OpenJDK.21 -e --accept-source-agreements --accept-package-agreements`), lalu lanjutkan; PATH baru otomatis terbaca. Untuk PHP di Windows tanpa winget, jelaskan langkah dari windows.php.net bila pemasangan gagal.',
+      '',
+      'GitHub (push, Actions, release):',
+      `- ${this.envInfo.github || 'Token GitHub: gunakan github_repo_info untuk memeriksa.'}`,
+      '- Untuk menyimpan ke GitHub gunakan github_push (commit + push dengan token pengguna), bukan git push manual. Buat repo baru dengan github_create_repo hanya bila belum ada.',
+      '- Pantau GitHub Actions sampai benar-benar selesai: setelah github_push, jika repo punya .github/workflows, panggil github_wait_workflow dengan head_sha = commit_sha. Jika conclusion "failure": github_workflow_logs untuk run yang gagal, baca berkas terkait, perbaiki akar masalahnya, uji lokal bila bisa, github_push lagi, lalu tunggu lagi. Ulangi sampai success. Jika "still_running", panggil github_wait_workflow lagi dengan run_id.',
+      '- Jika diminta membuat build/rilis otomatis tapi belum ada workflow, buat .github/workflows/<nama>.yml yang sesuai jenis proyek (mis. build APK/EXE/JAR, test), push, lalu pantau sampai hijau.',
+      '- Rilis: jika workflow tidak membuat release sendiri, gunakan github_create_release (tag versi, catatan rilis, unggah berkas hasil build bila ada). Laporkan link release dan unduhan.',
+      '- Gunakan github_rerun_workflow hanya untuk kegagalan sementara (jaringan/runner). Jika error yang sama muncul 3 kali berturut-turut atau penyebabnya di luar kode (secret belum diisi, izin token, kuota Actions), berhenti dan jelaskan apa yang perlu dilakukan pengguna.',
       s.customInstructions ? `\nInstruksi tambahan pengguna:\n${s.customInstructions}` : '',
       memory,
     ].filter(Boolean).join('\n');
@@ -228,7 +244,10 @@ class Agent extends EventEmitter {
     this.abort = new AbortController();
     const signal = this.abort.signal;
     const settings = this.getSettings();
-    const maxSteps = Math.max(5, Number(settings.maxSteps) || 80);
+    const maxSteps = Math.max(5, Number(settings.maxSteps) || 200);
+    try {
+      this.envInfo = (await Promise.race([this.getEnvInfo(), new Promise((r) => setTimeout(() => r({}), 12000))])) || {};
+    } catch { this.envInfo = {}; }
     this.setStatus('running', 'Berpikir');
 
     let reducedRetry = false;
@@ -354,7 +373,7 @@ class Agent extends EventEmitter {
     if (badArgs) {
       return finish('error', { error: 'Argumen tool bukan JSON objek yang valid (mungkin terpotong). Kirim ulang dengan argumen lebih kecil.' }, { error: 'Argumen tidak valid' });
     }
-    if (this.mode === 'plan' && (cat === 'edit' || cat === 'exec')) {
+    if (this.mode === 'plan' && (cat === 'edit' || cat === 'exec' || cat === 'publish')) {
       return finish('error', { error: 'Mode Rencana aktif: perubahan dan perintah tidak diizinkan. Tulis rencananya saja.' }, { error: 'Mode Rencana' });
     }
 
@@ -397,7 +416,33 @@ class Agent extends EventEmitter {
         return finish(ok ? 'done' : 'error', res, { exitCode: res.exit_code, output: item.output });
       }
 
-      const res = await tools.execute(root, name, args, { signal });
+      const ctx = {
+        signal,
+        github: this.getGitHub(),
+        ciWaitSeconds: Number(this.getSettings().ciWaitSeconds) || 1200,
+        onOutput: (chunk) => {
+          item.output = ((item.output || '') + chunk).slice(-20000);
+          this.emitEvent('tool_output', { itemId: item.id, chunk });
+        },
+        onStatus: (text) => {
+          this.setStatus('running', `${label} · ${text}`);
+        },
+      };
+      if (cat === 'publish' && this.needsApproval('publish')) {
+        const decision = await this.askPermission({ itemId: item.id, name, label, category: 'publish', command: publishSummary(name, args) });
+        if (!decision.allow) {
+          return finish('denied', { error: `Pengguna menolak aksi GitHub ini.${decision.feedback ? ` Masukan: ${decision.feedback}` : ''}` }, { error: 'Ditolak' });
+        }
+      }
+      const res = await tools.execute(root, name, args, ctx);
+      if (name === 'github_wait_workflow') {
+        const ci = res.conclusion || res.status;
+        const extra = { preview: { success: 'berhasil', failure: 'GAGAL', still_running: 'masih berjalan', not_found: 'tidak ada workflow', stopped: 'dihentikan' }[ci] || ci, link: res.runs && res.runs[0] ? res.runs[0].url : undefined };
+        return finish(ci === 'success' ? 'done' : ci === 'failure' || ci === 'not_found' ? 'error' : 'done', res, extra);
+      }
+      if (name === 'github_push' || name === 'github_create_release' || name === 'github_create_repo') {
+        return finish('done', res, { preview: res.commit_sha ? `commit ${res.commit_sha.slice(0, 7)}` : res.tag || res.repo, link: res.commit_url || res.url, output: item.output });
+      }
       if (name === 'todo_write') {
         this.todos = res.todos;
         this.emitEvent('todos', { todos: this.todos });
@@ -413,7 +458,7 @@ class Agent extends EventEmitter {
     if (this.alwaysAllow[category]) return false;
     if (this.mode === 'auto') return false;
     if (category === 'edit') return this.mode === 'ask';
-    if (category === 'exec') return this.mode === 'ask' || this.mode === 'acceptEdits';
+    if (category === 'exec' || category === 'publish') return this.mode === 'ask' || this.mode === 'acceptEdits';
     return false;
   }
 
@@ -477,7 +522,7 @@ class Agent extends EventEmitter {
     this.transcript = [];
     this.todos = [];
     this.checkpoints = [];
-    this.alwaysAllow = { edit: false, exec: false };
+    this.alwaysAllow = { edit: false, exec: false, publish: false };
     this.usage = { prompt: 0, completion: 0 };
     this.emitEvent('cleared', {});
     this.emitEvent('turn_end', { summary: this.summary() });
@@ -486,9 +531,21 @@ class Agent extends EventEmitter {
 
 function summarizeArgs(name, args) {
   const out = {};
-  for (const k of ['path', 'pattern', 'command', 'url', 'cwd', 'include']) if (args[k] !== undefined) out[k] = String(args[k]).slice(0, 300);
+  for (const k of ['path', 'pattern', 'command', 'url', 'cwd', 'include', 'repo', 'branch', 'message', 'tag', 'head_sha', 'run_id', 'name']) if (args[k] !== undefined) out[k] = String(args[k]).slice(0, 300);
   if (name === 'todo_write' && Array.isArray(args.todos)) out.todos = args.todos.length;
   return out;
+}
+
+function publishSummary(name, a) {
+  switch (name) {
+    case 'github_push': return `Commit "${a.message || ''}" lalu push ke ${a.repo || 'origin'}${a.branch ? ` (branch ${a.branch})` : ''}`;
+    case 'github_pull': return `git pull --rebase dari ${a.repo || 'origin'}${a.branch ? ` (${a.branch})` : ''}`;
+    case 'github_create_repo': return `Buat repo GitHub "${a.name}" (${a.private === false ? 'publik' : 'privat'})`;
+    case 'github_create_release': return `Buat release ${a.tag}${a.files && a.files.length ? ` dan unggah ${a.files.join(', ')}` : ''}`;
+    case 'github_rerun_workflow': return `Jalankan ulang workflow run ${a.run_id}`;
+    case 'github_dispatch_workflow': return `Picu workflow ${a.workflow}${a.ref ? ` di ${a.ref}` : ''}`;
+    default: return name;
+  }
 }
 
 function resultPreview(name, res) {

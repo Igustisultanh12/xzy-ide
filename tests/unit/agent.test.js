@@ -111,3 +111,28 @@ test('serialize/restore keeps the conversation and closes dangling calls', () =>
   assert.strictEqual(b.messages.length, 3);
   assert.strictEqual(b.messages[2].tool_call_id, 'c1');
 });
+
+test('GitHub publish actions ask for approval in acceptEdits mode and use the GitHub client', async () => {
+  const root = tmpWorkspace({ 'a.txt': 'x' });
+  const f = scriptedFetch([
+    openAiTurn({ tools: [['github_push', { message: 'rilis', repo: 'u/app' }]] }),
+    openAiTurn({ text: 'Selesai.' }),
+  ]);
+  const client = new TokenomixClient({ apiKey: 'k', fetchImpl: f });
+  const pushed = [];
+  const github = { push: async (r, a) => { pushed.push(a); return { ok: true, repo: 'u/app', commit_sha: 'a'.repeat(40), commit_url: 'https://github.com/u/app/commit/aaa' }; } };
+  const agent = new Agent({ model: 'm', mode: 'acceptEdits', getRoot: () => root, getClient: () => client, getGitHub: () => github, getEnvInfo: async () => ({ toolchain: 'Terpasang: PHP 8.3', github: 'Token GitHub aktif sebagai @u.' }) });
+  const perms = [];
+  agent.on('event', (e) => {
+    if (e.type === 'permission') { perms.push(e); setTimeout(() => agent.respondPermission(e.requestId, { allow: true }), 5); }
+  });
+  await agent.run('push');
+  assert.strictEqual(perms.length, 1);
+  assert.strictEqual(perms[0].category, 'publish');
+  assert.match(perms[0].command, /Commit "rilis" lalu push ke u\/app/);
+  assert.strictEqual(pushed[0].message, 'rilis');
+  const sys = f.calls[0].body.messages[0].content;
+  assert.match(sys, /Terpasang: PHP 8\.3/);
+  assert.match(sys, /github_wait_workflow/);
+  assert.ok(f.calls[0].body.tools.some((t) => t.function.name === 'github_push'));
+});

@@ -65,6 +65,37 @@ export function openSettings() {
     }
   };
 
+  // GitHub token
+  const ghToken = h('input', { class: 'input', type: 'password', placeholder: s.hasGithubToken ? `Tersimpan (${s.githubTokenHint}). Isi untuk mengganti.` : 'ghp_... atau github_pat_...', spellcheck: 'false', autocomplete: 'off' });
+  const ghOut = h('span', { class: 'muted small' });
+  const ghBtn = h('button', { class: 'btn btn-sm', text: 'Tes token GitHub' });
+  ghBtn.onclick = async () => {
+    ghBtn.disabled = true;
+    ghOut.textContent = 'Memeriksa...';
+    ghOut.style.color = '';
+    try {
+      const r = await api.github.test(ghToken.value.trim() || undefined);
+      ghOut.textContent = `Terhubung sebagai @${r.login}${r.fineGrained ? ' (fine-grained token)' : ''}${r.missing.length ? `. Scope kurang: ${r.missing.join(', ')}` : ''}`;
+      ghOut.style.color = r.missing.length ? 'var(--warn)' : 'var(--ok)';
+    } catch (e) {
+      ghOut.textContent = e.message;
+      ghOut.style.color = 'var(--err)';
+    } finally { ghBtn.disabled = false; }
+  };
+  const ghLink = h('a', { href: '#', text: 'Buat token (classic, centang repo + workflow)', onclick: (e) => { e.preventDefault(); api.openExternal('https://github.com/settings/tokens/new?scopes=repo,workflow&description=XZY%20IDE'); } });
+  const ciWait = h('input', { class: 'input', type: 'number', min: '60', max: '3600', step: '60', value: s.ciWaitSeconds || 1200 });
+
+  // Installed runtimes
+  const tools = h('div', { class: 'tool-list' }, h('span', { class: 'muted', text: 'Memeriksa...' }));
+  const fillTools = (list) => {
+    tools.innerHTML = '';
+    for (const t of list) {
+      tools.append(h('span', { text: t.label }), h('span', { class: t.installed ? 'ok' : 'no', text: t.installed ? (t.version || 'terpasang') : (t.winget ? `belum (winget ${t.winget})` : 'belum') }));
+    }
+  };
+  api.toolchain(false).then(fillTools).catch(() => { tools.innerHTML = ''; });
+  const toolsBtn = h('button', { class: 'btn btn-sm', text: 'Periksa ulang', onclick: async () => { tools.innerHTML = '<span class="muted">Memeriksa...</span>'; fillTools(await api.toolchain(true)); } });
+
   const keyLink = h('a', { href: '#', text: 'Dapatkan API key di tokenomixai.com', onclick: (e) => { e.preventDefault(); api.openExternal('https://tokenomixai.com/'); } });
   m.body.append(
     h('div', { class: 'field' }, h('label', { text: 'API key TokenomixAI' }), apiKey, h('div', { class: 'hint' }, 'Disimpan terenkripsi (Windows DPAPI) di profil pengguna. ', keyLink)),
@@ -73,6 +104,11 @@ export function openSettings() {
     h('div', { class: 'field-row' }, field('Model default', model), field('Mode izin default', mode)),
     h('div', { class: 'field-row' }, field('Maks langkah agen per pesan', maxSteps), field('Maks token output', maxTokens)),
     field('Instruksi tambahan untuk agen', custom, 'Ditambahkan ke setiap percakapan. Instruksi khusus proyek bisa ditaruh di XZY.md di root proyek.'),
+    h('div', { class: 'field' }, h('label', { text: 'Token GitHub (untuk push, pantau Actions, dan rilis oleh agen)' }), ghToken, h('div', { class: 'hint' }, 'Disimpan terenkripsi. ', ghLink, '. Fine-grained token: beri akses repo dengan Contents, Actions, Workflows = Read and write, dan Administration = Read and write untuk membuat repo baru.')),
+    h('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, ghBtn, ghOut),
+    field('Maks waktu tunggu GitHub Actions per panggilan (detik)', ciWait, 'Agen memanggil lagi otomatis jika workflow belum selesai.'),
+    h('div', { class: 'field' }, h('div', { style: 'display:flex;justify-content:space-between;align-items:center' }, h('label', { text: 'Runtime terpasang di komputer ini' }), toolsBtn), tools,
+      h('div', { class: 'hint', text: 'Dipakai tombol Jalankan (F5) dan agen. Runtime yang belum ada bisa dipasang agen lewat winget.' })),
     h('div', { class: 'field-row' }, field('Tema', theme), field('Ukuran font editor', fontSize)),
     h('div', { class: 'field-row' }, field('Word wrap', wrap), field('Simpan otomatis', autoSave)),
   );
@@ -93,6 +129,8 @@ export function openSettings() {
         customInstructions: custom.value,
       };
       if (apiKey.value.trim()) patch.apiKey = apiKey.value.trim();
+      if (ghToken.value.trim()) patch.githubToken = ghToken.value.trim();
+      patch.ciWaitSeconds = Number(ciWait.value) || 1200;
       const hadKey = state.settings.hasApiKey;
       state.settings = await api.settings.set(patch);
       emit('settings', state.settings);

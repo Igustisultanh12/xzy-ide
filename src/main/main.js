@@ -13,6 +13,9 @@ const { Agent } = require('./agent');
 const tools = require('./tools');
 const git = require('./git');
 const { TerminalManager } = require('./terminal');
+const { GitHub } = require('./github');
+const { freshEnv, detectToolchain, toolchainSummary, invalidatePath } = require('./env');
+const runconfig = require('./runconfig');
 
 const APP_ROOT = path.join(__dirname, '..', '..');
 const isE2E = process.env.XZY_E2E === '1';
@@ -84,6 +87,34 @@ function attachAgent(agent) {
   return agent;
 }
 
+let lastEnv = process.env;
+let ghLogin = null;
+
+function github() {
+  const token = settings.get('githubToken');
+  return token ? new GitHub({ token, env: lastEnv }) : null;
+}
+
+/** Facts for the agent's system prompt: installed runtimes and GitHub state. */
+async function envInfo() {
+  lastEnv = await freshEnv();
+  const info = {};
+  try { info.toolchain = toolchainSummary(await detectToolchain()); } catch { /* optional */ }
+  const gh = github();
+  if (!gh) {
+    info.github = 'Token GitHub BELUM diisi: tool github_* akan gagal. Jika pengguna minta push/rilis, minta mereka mengisi token di Pengaturan > GitHub (classic: scope repo + workflow).';
+  } else {
+    try {
+      if (!ghLogin) ghLogin = (await gh.me()).login;
+      const origin = workspaceRoot ? await gh.originRepo(workspaceRoot) : null;
+      info.github = `Token GitHub aktif sebagai @${ghLogin}. Remote origin workspace: ${origin || '(belum ada; buat dengan github_create_repo atau sebutkan repo)'}.`;
+    } catch (e) {
+      info.github = `Token GitHub tersimpan tetapi gagal diverifikasi: ${e.message}`;
+    }
+  }
+  return info;
+}
+
 function newAgent(opts = {}) {
   return attachAgent(new Agent({
     model: opts.model || settings.get('defaultModel'),
@@ -92,6 +123,8 @@ function newAgent(opts = {}) {
     getRoot: () => workspaceRoot,
     getClient: client,
     getSettings: () => settings.all(),
+    getGitHub: github,
+    getEnvInfo: envInfo,
   }));
 }
 
@@ -101,7 +134,7 @@ function loadSessions(root) {
   try {
     const data = JSON.parse(fs.readFileSync(sessionsFile(root), 'utf8'));
     for (const s of data.agents || []) {
-      const a = new Agent({ id: s.id, getRoot: () => workspaceRoot, getClient: client, getSettings: () => settings.all() });
+      const a = new Agent({ id: s.id, getRoot: () => workspaceRoot, getClient: client, getSettings: () => settings.all(), getGitHub: github, getEnvInfo: envInfo });
       attachAgent(a.restore(s));
     }
   } catch { /* none yet */ }
@@ -172,6 +205,7 @@ function registerIpc() {
 
   handle('settings:get', () => settings.public());
   handle('settings:set', (patch) => {
+    if (patch && patch.githubToken !== undefined) ghLogin = null;
     const r = settings.set(patch);
     nativeTheme.themeSource = r.theme === 'light' ? 'light' : 'dark';
     return r;
@@ -185,6 +219,31 @@ function registerIpc() {
     return { count: models.length, sample: models.slice(0, 5).map((m) => m.id) };
   });
   handle('models:list', () => client().listModels());
+  handle('github:test', async (token) => {
+    const gh = new GitHub({ token: token && !token.includes('...') ? token : settings.get('githubToken') });
+    const res = await gh.api('GET', '/user', null, { raw: true });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(res.status === 401 ? 'Token GitHub tidak valid atau kedaluwarsa.' : `GitHub HTTP ${res.status}: ${json.message || ''}`);
+    const scopes = res.headers.get('x-oauth-scopes');
+    const missing = scopes === null ? [] : ['repo', 'workflow'].filter((s) => !scopes.split(',').map((x) => x.trim()).includes(s));
+    return { login: json.login, scopes, fineGrained: scopes === null, missing };
+  });
+  handle('github:runs', async () => {
+    const gh = github();
+    if (!gh || !workspaceRoot) return { repo: null, runs: [] };
+    const repo = await gh.originRepo(workspaceRoot);
+    if (!repo) return { repo: null, runs: [] };
+    return gh.listRuns(workspaceRoot, { repo, limit: 8 });
+  });
+  handle('toolchain:detect', async (force) => {
+    if (force) invalidatePath();
+    return detectToolchain({ force: !!force });
+  });
+  handle('run:configs', () => runconfig.detectConfigs(workspaceRoot));
+  handle('run:file', (rel) => {
+    const abs = inside(rel);
+    return runconfig.commandForFile(workspaceRoot, tools.relPath(workspaceRoot, abs));
+  });
 
   handle('workspace:pick', async () => {
     const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'], title: 'Buka folder' });
@@ -268,7 +327,7 @@ function registerIpc() {
     return shell.openExternal(url);
   });
 
-  handle('term:create', (id, opts = {}) => terminals.create(id, { ...opts, cwd: workspaceRoot }));
+  handle('term:create', async (id, opts = {}) => terminals.create(id, { ...opts, cwd: workspaceRoot, env: await freshEnv() }));
   ipcMain.on('term:write', (_e, id, data) => terminals.write(id, data));
   ipcMain.on('term:resize', (_e, id, cols, rows) => terminals.resize(id, cols, rows));
   handle('term:kill', (id) => { terminals.kill(id); return true; });

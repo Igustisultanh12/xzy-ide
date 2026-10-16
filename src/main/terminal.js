@@ -35,11 +35,11 @@ class TerminalManager {
 
   get mode() { return pty ? 'pty' : 'pipe'; }
 
-  create(id, { cwd, cols = 100, rows = 30 } = {}) {
+  create(id, { cwd, cols = 100, rows = 30, env: baseEnv } = {}) {
     this.kill(id);
     const shell = defaultShell();
     const workDir = cwd && fs.existsSync(cwd) ? cwd : os.homedir();
-    const env = { ...process.env, TERM_PROGRAM: 'xzy-ide', COLORTERM: 'truecolor' };
+    const env = { ...(baseEnv || process.env), TERM_PROGRAM: 'xzy-ide', COLORTERM: 'truecolor' };
 
     if (pty) {
       try {

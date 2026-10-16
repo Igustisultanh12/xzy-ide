@@ -10,18 +10,21 @@ const path = require('path');
 
 const DEFAULTS = {
   apiKey: '',
+  githubToken: '',
+  ciWaitSeconds: 1200,
   baseUrl: 'https://api.tokenomixai.com/v1',
   defaultModel: '',
   defaultMode: 'ask',
   theme: 'dark',
   fontSize: 14,
   wordWrap: 'off',
-  maxSteps: 80,
+  maxSteps: 200,
   maxTokens: 16384,
   customInstructions: '',
   autoSave: false,
   recentFolders: [],
   lastFolder: '',
+  maxStepsCustom: false,
 };
 
 class Settings {
@@ -33,7 +36,11 @@ class Settings {
       const raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
       this.data = { ...DEFAULTS, ...raw };
       if (raw.apiKeyEnc) this.data.apiKey = this.decrypt(raw.apiKeyEnc);
+      if (raw.githubTokenEnc) this.data.githubToken = this.decrypt(raw.githubTokenEnc);
       delete this.data.apiKeyEnc;
+      delete this.data.githubTokenEnc;
+      // Older versions defaulted to 80 steps; long build/fix/release loops need more
+      if (!raw.maxStepsCustom && Number(this.data.maxSteps) === 80) this.data.maxSteps = 200;
     } catch { /* first run */ }
   }
 
@@ -61,18 +68,26 @@ class Settings {
 
   /** Settings for the renderer: the key itself never leaves the main process. */
   public() {
-    const { apiKey, ...rest } = this.data;
-    return { ...rest, hasApiKey: !!apiKey, apiKeyHint: apiKey ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}` : '' };
+    const { apiKey, githubToken, ...rest } = this.data;
+    return {
+      ...rest,
+      hasApiKey: !!apiKey,
+      apiKeyHint: apiKey ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}` : '',
+      hasGithubToken: !!githubToken,
+      githubTokenHint: githubToken ? `${githubToken.slice(0, 7)}...${githubToken.slice(-4)}` : '',
+    };
   }
 
   set(patch) {
     for (const [k, v] of Object.entries(patch || {})) {
       if (!(k in DEFAULTS)) continue;
-      if (k === 'apiKey' && typeof v === 'string' && v.includes('...')) continue; // masked value sent back
+      if ((k === 'apiKey' || k === 'githubToken') && typeof v === 'string' && v.includes('...')) continue; // masked value sent back
+      if (k === 'maxSteps') this.data.maxStepsCustom = true;
       this.data[k] = v;
     }
     this.data.fontSize = Math.min(Math.max(Number(this.data.fontSize) || 14, 10), 28);
-    this.data.maxSteps = Math.min(Math.max(Number(this.data.maxSteps) || 80, 5), 500);
+    this.data.maxSteps = Math.min(Math.max(Number(this.data.maxSteps) || 200, 5), 1000);
+    this.data.ciWaitSeconds = Math.min(Math.max(Number(this.data.ciWaitSeconds) || 1200, 60), 3600);
     this.save();
     return this.public();
   }
@@ -85,10 +100,10 @@ class Settings {
   }
 
   save() {
-    const { apiKey, ...rest } = this.data;
+    const { apiKey, githubToken, ...rest } = this.data;
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     const tmp = this.file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify({ ...rest, apiKeyEnc: this.encrypt(apiKey) }, null, 2));
+    fs.writeFileSync(tmp, JSON.stringify({ ...rest, apiKeyEnc: this.encrypt(apiKey), githubTokenEnc: this.encrypt(githubToken) }, null, 2));
     fs.renameSync(tmp, this.file);
   }
 }

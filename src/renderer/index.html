@@ -93,7 +93,14 @@
       </div>
 
       <div id="editor-area">
-        <div id="tabs" class="tabs"></div>
+        <div class="tabbar">
+          <div id="tabs" class="tabs"></div>
+          <div class="editor-actions">
+            <select id="run-config" class="select select-sm" title="Apa yang dijalankan"></select>
+            <button id="run-btn" class="btn btn-ok btn-sm" title="Jalankan (F5)">Jalankan</button>
+            <button id="run-stop" class="icon-btn" title="Hentikan (Shift+F5)"></button>
+          </div>
+        </div>
         <div id="breadcrumb" class="breadcrumb"></div>
         <div id="editor-host">
           <div id="editor"></div>

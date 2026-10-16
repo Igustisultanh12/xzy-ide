@@ -9,15 +9,20 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const { spawn } = require('child_process');
+const { freshEnv, detectToolchain } = require('./env');
+const { detectConfigs } = require('./runconfig');
 
 const IGNORED_DIRS = new Set(['node_modules', '.git', 'vendor', 'dist', 'build', 'out', '.next', '.nuxt', '.venv', 'venv', '__pycache__', '.gradle', '.idea', 'target', 'bin', 'obj', 'coverage', '.cache']);
 const MAX_READ_LINES = 2000;
 const MAX_OUTPUT = 30000;
 
-const READ_TOOLS = new Set(['list_dir', 'read_file', 'glob', 'grep', 'todo_write', 'open_preview']);
+const READ_TOOLS = new Set(['list_dir', 'read_file', 'glob', 'grep', 'todo_write', 'open_preview', 'check_toolchain', 'run_configs',
+  'github_repo_info', 'github_workflow_runs', 'github_wait_workflow', 'github_workflow_logs', 'github_list_releases']);
 const EDIT_TOOLS = new Set(['write_file', 'edit_file', 'delete_file']);
 const EXEC_TOOLS = new Set(['run_command']);
 const NET_TOOLS = new Set(['web_fetch']);
+// Actions that change things on GitHub
+const PUBLISH_TOOLS = new Set(['github_create_repo', 'github_push', 'github_pull', 'github_rerun_workflow', 'github_dispatch_workflow', 'github_create_release']);
 
 function definitions({ planMode = false } = {}) {
   const fn = (name, description, properties = {}, required = []) => ({
@@ -68,6 +73,45 @@ function definitions({ planMode = false } = {}) {
     }, ['todos']),
     fn('web_fetch', 'Mengambil isi halaman web (teks) dari URL http/https, mis. dokumentasi.', { url: { type: 'string' } }, ['url']),
     fn('open_preview', 'Membuka URL (mis. http://localhost:5173) di panel pratinjau browser IDE agar pengguna bisa melihat hasilnya.', { url: { type: 'string' } }, ['url']),
+    fn('check_toolchain', 'Daftar runtime/compiler yang terpasang di komputer pengguna beserta versinya (PHP, Java, Python, Node, Go, Rust, .NET, GCC, Git, dll) dan ID winget untuk memasang yang belum ada.', { refresh: { type: 'boolean' } }),
+    fn('run_configs', 'Konfigurasi run yang terdeteksi dari proyek (mis. php artisan serve, npm run dev, gradlew assembleDebug, mvn spring-boot:run, go run .).'),
+    fn('github_repo_info', 'Info repo GitHub (default branch, izin push, ada workflow atau tidak). Tanpa argumen repo memakai remote origin workspace.', { repo: { type: 'string', description: 'pemilik/repo atau link GitHub (opsional)' } }),
+    fn('github_create_repo', 'Membuat repo GitHub baru di akun pengguna (dipakai bila workspace belum punya repo). Jika sudah ada, repo itu dipakai.', {
+      name: { type: 'string' }, private: { type: 'boolean', description: 'default true' }, description: { type: 'string' },
+    }, ['name']),
+    fn('github_push', 'Commit semua perubahan workspace lalu push ke GitHub memakai token pengguna (git init dan remote origin dibuat otomatis bila belum ada). Tanpa force push. Mengembalikan commit_sha untuk dipantau.', {
+      message: { type: 'string', description: 'Pesan commit yang jelas' },
+      repo: { type: 'string', description: 'pemilik/repo atau link (opsional jika origin sudah ada)' },
+      branch: { type: 'string', description: 'Branch tujuan (default: branch saat ini)' },
+    }, ['message']),
+    fn('github_pull', 'Mengambil perubahan terbaru dari GitHub (git pull --rebase) memakai token pengguna. Dipakai jika push ditolak karena remote lebih baru.', {
+      repo: { type: 'string' }, branch: { type: 'string' },
+    }),
+    fn('github_workflow_runs', 'Daftar workflow run GitHub Actions terbaru (status/hasil) untuk repo, branch, atau commit.', {
+      repo: { type: 'string' }, branch: { type: 'string' }, head_sha: { type: 'string' },
+    }),
+    fn('github_wait_workflow', 'Menunggu GitHub Actions selesai untuk commit (head_sha dari github_push) atau run_id, lalu mengembalikan hasil (success/failure, artifact, release). Bisa menunggu hingga 20 menit; panggil lagi jika still_running.', {
+      repo: { type: 'string' }, head_sha: { type: 'string' }, run_id: { type: 'integer' }, branch: { type: 'string' },
+    }),
+    fn('github_workflow_logs', 'Membaca penyebab workflow run gagal: job dan step yang gagal, anotasi error (file:baris), dan potongan log yang relevan.', {
+      repo: { type: 'string' }, run_id: { type: 'integer' },
+    }, ['run_id']),
+    fn('github_rerun_workflow', 'Menjalankan ulang job yang gagal (untuk kegagalan sementara seperti jaringan/timeout, bukan error kode).', {
+      repo: { type: 'string' }, run_id: { type: 'integer' },
+    }, ['run_id']),
+    fn('github_dispatch_workflow', 'Memicu workflow yang punya trigger workflow_dispatch.', {
+      repo: { type: 'string' }, workflow: { type: 'string', description: 'Nama berkas, mis. build.yml' }, ref: { type: 'string' }, inputs: { type: 'object' },
+    }, ['workflow']),
+    fn('github_list_releases', 'Daftar release terbaru di repo.', { repo: { type: 'string' } }),
+    fn('github_create_release', 'Membuat release GitHub (tag) dan opsional mengunggah berkas hasil build dari workspace sebagai aset (mis. APK, EXE, ZIP).', {
+      repo: { type: 'string' },
+      tag: { type: 'string', description: 'mis. v1.0.0' },
+      name: { type: 'string' },
+      body: { type: 'string', description: 'Catatan rilis (markdown). Kosong = dibuat otomatis oleh GitHub.' },
+      target: { type: 'string', description: 'Branch/commit (default: default branch)' },
+      prerelease: { type: 'boolean' },
+      files: { type: 'array', items: { type: 'string' }, description: 'Path berkas di workspace untuk diunggah' },
+    }, ['tag']),
   ];
   if (planMode) return all.filter((t) => READ_TOOLS.has(t.function.name) || NET_TOOLS.has(t.function.name));
   return all;
@@ -76,6 +120,7 @@ function definitions({ planMode = false } = {}) {
 function category(name) {
   if (EDIT_TOOLS.has(name)) return 'edit';
   if (EXEC_TOOLS.has(name)) return 'exec';
+  if (PUBLISH_TOOLS.has(name)) return 'publish';
   if (NET_TOOLS.has(name)) return 'net';
   return 'read';
 }
@@ -94,6 +139,19 @@ function describe(name, args = {}) {
     case 'todo_write': return 'Memperbarui daftar tugas';
     case 'web_fetch': return `Membuka ${args.url || ''}`;
     case 'open_preview': return `Pratinjau ${args.url || ''}`;
+    case 'check_toolchain': return 'Memeriksa runtime terpasang';
+    case 'run_configs': return 'Mendeteksi cara menjalankan proyek';
+    case 'github_repo_info': return `Info repo GitHub ${args.repo || ''}`.trim();
+    case 'github_create_repo': return `Membuat repo GitHub ${args.name || ''}`;
+    case 'github_push': return `Push ke GitHub${args.repo ? ` ${args.repo}` : ''}${args.branch ? `:${args.branch}` : ''}`;
+    case 'github_pull': return 'Pull dari GitHub';
+    case 'github_workflow_runs': return 'Melihat GitHub Actions';
+    case 'github_wait_workflow': return `Menunggu GitHub Actions${args.head_sha ? ` @${String(args.head_sha).slice(0, 7)}` : args.run_id ? ` run ${args.run_id}` : ''}`;
+    case 'github_workflow_logs': return `Membaca log workflow gagal (run ${args.run_id || ''})`;
+    case 'github_rerun_workflow': return `Menjalankan ulang workflow (run ${args.run_id || ''})`;
+    case 'github_dispatch_workflow': return `Memicu workflow ${args.workflow || ''}`;
+    case 'github_list_releases': return 'Melihat release GitHub';
+    case 'github_create_release': return `Membuat release ${args.tag || ''}`;
     default: return name;
   }
 }
@@ -233,14 +291,14 @@ function truncateMiddle(s, max) {
 /** Processes started with background=true, so they can be listed/stopped. */
 const backgroundProcs = new Map();
 
-function runCommand(root, args, { signal, onOutput = () => {} } = {}) {
+function runCommand(root, args, { signal, onOutput = () => {}, env } = {}) {
   const cwd = resolveInside(root, args.cwd || '.');
   const timeout = Math.min(Math.max(Number(args.timeout_seconds) || 120, 5), 1800) * 1000;
   const { file, args: shellArgs } = shellFor(String(args.command || ''));
   return new Promise((resolve) => {
     let out = '';
     let killed = false;
-    const child = spawn(file, shellArgs, { cwd, env: { ...process.env, FORCE_COLOR: '0', CI: process.env.CI || '' }, windowsHide: true });
+    const child = spawn(file, shellArgs, { cwd, env: { ...(env || process.env), FORCE_COLOR: '0' }, windowsHide: true });
     const push = (d) => {
       const s = d.toString('utf8');
       out += s;
@@ -396,7 +454,28 @@ async function execute(root, name, args, ctx = {}) {
       return { pattern: args.pattern, files_searched: filesSearched, count: matches.length, matches, truncated: matches.length >= 300 || undefined };
     }
     case 'run_command':
-      return runCommand(root, args, ctx);
+      return runCommand(root, args, { ...ctx, env: await freshEnv() });
+    case 'check_toolchain': {
+      const list = await detectToolchain({ force: !!args.refresh });
+      return { platform: process.platform, tools: list };
+    }
+    case 'run_configs':
+      return { configs: detectConfigs(root) };
+    case 'github_repo_info': return gh(ctx).repoInfo(root, args.repo);
+    case 'github_create_repo': return gh(ctx).createRepo(args);
+    case 'github_push': return gh(ctx).push(root, { ...args, onOutput: ctx.onOutput });
+    case 'github_pull': return gh(ctx).pull(root, { ...args, onOutput: ctx.onOutput });
+    case 'github_workflow_runs': return gh(ctx).listRuns(root, args);
+    case 'github_wait_workflow':
+      return gh(ctx).waitRuns(root, { ...args, maxSeconds: ctx.ciWaitSeconds || 1200 }, {
+        onStatus: ctx.onStatus || (() => {}),
+        shouldStop: () => !!(ctx.signal && ctx.signal.aborted),
+      });
+    case 'github_workflow_logs': return gh(ctx).failureDetails(root, args);
+    case 'github_rerun_workflow': return gh(ctx).rerun(root, args);
+    case 'github_dispatch_workflow': return gh(ctx).dispatch(root, args);
+    case 'github_list_releases': return gh(ctx).listReleases(root, args);
+    case 'github_create_release': return gh(ctx).createRelease(root, args);
     case 'todo_write': {
       const todos = Array.isArray(args.todos) ? args.todos.filter((t) => t && t.content).map((t) => ({
         content: String(t.content),
@@ -427,6 +506,11 @@ async function execute(root, name, args, ctx = {}) {
     default:
       throw new ToolError(`Tool tidak dikenal: ${name}`);
   }
+}
+
+function gh(ctx) {
+  if (!ctx || !ctx.github) throw new ToolError('Integrasi GitHub belum siap. Isi token GitHub di Pengaturan.');
+  return ctx.github;
 }
 
 module.exports = {
