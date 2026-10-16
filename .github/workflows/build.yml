@@ -26,25 +26,25 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: node scripts/ci-run.js "npm install" npm install --no-audit --no-fund
 
       - name: Unit tests
-        run: npm test
+        run: node scripts/ci-run.js "Unit tests" npm test
 
       - name: End-to-end test (dev)
-        run: npm run test:e2e
+        run: node scripts/ci-run.js "E2E dev" npm run test:e2e
 
       - name: Build installers (.exe + .msi)
-        run: npx electron-builder --win nsis msi --x64 --publish never
+        run: node scripts/ci-run.js "Build installers" npx electron-builder --win nsis msi --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
       - name: End-to-end test (packaged app)
         shell: pwsh
-        run: node tests/e2e/run.js --packaged "release/win-unpacked/XZY IDE.exe"
+        run: node scripts/ci-run.js "E2E packaged" node tests/e2e/run.js --packaged '"release/win-unpacked/XZY IDE.exe"'
 
       - name: List output
         shell: pwsh
